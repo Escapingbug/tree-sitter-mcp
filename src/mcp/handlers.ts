@@ -63,6 +63,15 @@ async function getOrCreateMCPProject(projectId?: string, directory?: string, ign
 function getSearchNodes(project: Project) {
   const allNodes = Array.from(project.files.values())
   const elementNodes = Array.from(project.nodes.values()).flat()
+
+  // Include nodes from subProjects (for monorepo support)
+  if (project.subProjects) {
+    for (const subProject of project.subProjects) {
+      allNodes.push(...Array.from(subProject.files.values()))
+      elementNodes.push(...Array.from(subProject.nodes.values()).flat())
+    }
+  }
+
   return [...allNodes, ...elementNodes]
 }
 
@@ -100,6 +109,7 @@ async function handleSearchCode(args: JsonObject): Promise<MCPToolResult> {
     exactMatch = false,
     types = [],
     pathPattern,
+    ignoreDirs = [],
     // New content inclusion options
     forceContentInclusion = false,
     maxContentLines = 150,
@@ -114,7 +124,7 @@ async function handleSearchCode(args: JsonObject): Promise<MCPToolResult> {
     const project = await getOrCreateMCPProject(
       typeof projectId === 'string' ? projectId : undefined,
       typeof directory === 'string' ? directory : undefined,
-      [],
+      Array.isArray(ignoreDirs) ? ignoreDirs as string[] : [],
     )
     const searchNodes = getSearchNodes(project)
 
@@ -171,6 +181,7 @@ async function handleFindUsage(args: JsonObject): Promise<MCPToolResult> {
     exactMatch = true,
     maxResults = 50,
     pathPattern,
+    ignoreDirs = [],
   } = args
 
   if (typeof identifier !== 'string') {
@@ -181,7 +192,7 @@ async function handleFindUsage(args: JsonObject): Promise<MCPToolResult> {
     const project = await getOrCreateMCPProject(
       typeof projectId === 'string' ? projectId : undefined,
       typeof directory === 'string' ? directory : undefined,
-      [],
+      Array.isArray(ignoreDirs) ? ignoreDirs as string[] : [],
     )
     const searchNodes = getSearchNodes(project)
 
