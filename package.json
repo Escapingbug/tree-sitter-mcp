@@ -32,8 +32,9 @@
   ],
   "scripts": {
     "dev": "tsx watch src/cli.ts",
-    "build": "tsc && chmod +x dist/cli.js",
-    "clean": "rm -rf dist",
+    "build": "tsc",
+    "build:unix": "tsc && chmod +x dist/cli.js",
+    "clean": "node -e \"require('fs').rmSync('dist', {recursive:true, force:true})\"",
     "test": "vitest run",
     "test:unit": "vitest run src/test/unit/",
     "test:cli": "vitest run src/test/cli/",
