@@ -1,0 +1,1 @@
+{"version":3,"file":"quality.d.ts","sourceRoot":"","sources":["../../src/analysis/quality.ts"],"names":[],"mappings":"AAAA;;GAEG;AAMH,OAAO,KAAK,EAAE,QAAQ,EAAE,MAAM,kBAAkB,CAAA;AAChD,OAAO,KAAK,EAAE,OAAO,EAAE,cAAc,EAAE,MAAM,sBAAsB,CAAA;AAEnE,MAAM,WAAW,aAAa;IAC5B,OAAO,EAAE,cAAc,CAAA;IACvB,QAAQ,EAAE,OAAO,EAAE,CAAA;CACpB;AAED,wBAAgB,cAAc,CAAC,KAAK,EAAE,QAAQ,EAAE,GAAG,aAAa,CA8C/D"}

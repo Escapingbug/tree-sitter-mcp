@@ -1,0 +1,1 @@
+{"version":3,"file":"deadcode.d.ts","sourceRoot":"","sources":["../../src/analysis/deadcode.ts"],"names":[],"mappings":"AAAA;;GAEG;AAKH,OAAO,KAAK,EAAE,OAAO,EAAY,MAAM,kBAAkB,CAAA;AACzD,OAAO,KAAK,EAAkB,eAAe,EAAE,OAAO,EAAE,MAAM,sBAAsB,CAAA;AAEpF,MAAM,WAAW,sBAAsB;IACrC,OAAO,EAAE,eAAe,CAAA;IACxB,QAAQ,EAAE,OAAO,EAAE,CAAA;CACpB;AAED,wBAAgB,eAAe,CAAC,OAAO,EAAE,OAAO,GAAG,sBAAsB,CAsBxE"}

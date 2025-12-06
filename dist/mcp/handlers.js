@@ -1,0 +1,236 @@
+/**
+ * MCP tool request handlers - simplified from complex handler system
+ */
+import { analyzeProject } from '../analysis/index.js';
+import { analyzeErrors } from '../analysis/errors.js';
+import { searchCode, findUsage } from '../core/search.js';
+import { createPersistentManager, getOrCreateProject } from '../project/persistent-manager.js';
+import { getLogger } from '../utils/logger.js';
+import { handleError } from '../utils/errors.js';
+const mcpPersistentManager = createPersistentManager(10);
+// Export function for test cleanup
+export function clearMCPMemory() {
+    // Stop all watchers first
+    for (const stopWatcher of mcpPersistentManager.watchers.values()) {
+        stopWatcher();
+    }
+    mcpPersistentManager.watchers.clear();
+    // Clear all projects from memory
+    mcpPersistentManager.memory.projects.clear();
+    mcpPersistentManager.directoryToProject.clear();
+    mcpPersistentManager.projectToDirectory.clear();
+    // Force garbage collection if available
+    if (global.gc) {
+        global.gc();
+    }
+}
+async function getOrCreateMCPProject(projectId, directory, ignoreDirs) {
+    const actualDirectory = directory || (projectId && projectId.startsWith('/') ? projectId : process.cwd());
+    const actualProjectId = projectId && !projectId.startsWith('/') ? projectId : undefined;
+    return getOrCreateProject(mcpPersistentManager, {
+        directory: actualDirectory,
+        ignoreDirs: ignoreDirs || [],
+        autoWatch: process.env.NODE_ENV !== 'test',
+    }, actualProjectId);
+}
+function getSearchNodes(project) {
+    const allNodes = Array.from(project.files.values());
+    const elementNodes = Array.from(project.nodes.values()).flat();
+    // Include nodes from subProjects (for monorepo support)
+    if (project.subProjects) {
+        for (const subProject of project.subProjects) {
+            allNodes.push(...Array.from(subProject.files.values()));
+            elementNodes.push(...Array.from(subProject.nodes.values()).flat());
+        }
+    }
+    return [...allNodes, ...elementNodes];
+}
+export async function handleToolRequest(request) {
+    const { name, arguments: args = {} } = request.params;
+    const logger = getLogger();
+    logger.debug(`Handling tool request: ${name}`);
+    switch (name) {
+        case 'search_code':
+            return handleSearchCode(args);
+        case 'find_usage':
+            return handleFindUsage(args);
+        case 'analyze_code':
+            return handleAnalyzeCode(args);
+        case 'check_errors':
+            return handleCheckErrors(args);
+        default:
+            throw new Error(`Unknown tool: ${name}`);
+    }
+}
+async function handleSearchCode(args) {
+    const { projectId, directory, query, maxResults = 20, fuzzyThreshold = 30, exactMatch = false, types = [], pathPattern, ignoreDirs = [], 
+    // New content inclusion options
+    forceContentInclusion = false, maxContentLines = 150, disableContentInclusion = false, } = args;
+    if (typeof query !== 'string') {
+        throw new Error('Query must be a string');
+    }
+    try {
+        const project = await getOrCreateMCPProject(typeof projectId === 'string' ? projectId : undefined, typeof directory === 'string' ? directory : undefined, Array.isArray(ignoreDirs) ? ignoreDirs : []);
+        const searchNodes = getSearchNodes(project);
+        const results = searchCode(query, searchNodes, {
+            maxResults: Number(maxResults),
+            fuzzyThreshold: Number(fuzzyThreshold),
+            exactMatch: Boolean(exactMatch),
+            types: Array.isArray(types) ? types : [],
+            pathPattern: typeof pathPattern === 'string' ? pathPattern : undefined,
+            // New content inclusion options
+            forceContentInclusion: Boolean(forceContentInclusion),
+            maxContentLines: Number(maxContentLines),
+            disableContentInclusion: Boolean(disableContentInclusion),
+        });
+        return {
+            content: [{
+                    type: 'text',
+                    text: JSON.stringify({
+                        projectId: project.id,
+                        query,
+                        results: results.map(r => ({
+                            name: r.node.name,
+                            type: r.node.type,
+                            path: r.node.path,
+                            startLine: r.node.startLine,
+                            endLine: r.node.endLine,
+                            startColumn: r.node.startColumn,
+                            endColumn: r.node.endColumn,
+                            score: r.score,
+                            matches: r.matches,
+                            // New content inclusion fields
+                            contentIncluded: r.contentIncluded,
+                            content: r.content,
+                            contentTruncated: r.contentTruncated,
+                            contentLines: r.contentLines,
+                        })),
+                        totalResults: results.length,
+                    }, null, 2),
+                }],
+        };
+    }
+    catch (error) {
+        throw handleError(error, 'Search code failed');
+    }
+}
+async function handleFindUsage(args) {
+    const { projectId, directory, identifier, caseSensitive = false, exactMatch = true, maxResults = 50, pathPattern, ignoreDirs = [], } = args;
+    if (typeof identifier !== 'string') {
+        throw new Error('Identifier must be a string');
+    }
+    try {
+        const project = await getOrCreateMCPProject(typeof projectId === 'string' ? projectId : undefined, typeof directory === 'string' ? directory : undefined, Array.isArray(ignoreDirs) ? ignoreDirs : []);
+        const searchNodes = getSearchNodes(project);
+        const results = findUsage(identifier, searchNodes, {
+            caseSensitive: Boolean(caseSensitive),
+            exactMatch: Boolean(exactMatch),
+            pathPattern: typeof pathPattern === 'string' ? pathPattern : undefined,
+        });
+        return {
+            content: [{
+                    type: 'text',
+                    text: JSON.stringify({
+                        projectId: project.id,
+                        identifier,
+                        usages: results.slice(0, Number(maxResults)).map(result => ({
+                            path: result.node.path,
+                            startLine: result.startLine,
+                            endLine: result.endLine,
+                            startColumn: result.startColumn,
+                            endColumn: result.endColumn,
+                            type: result.node.type,
+                            name: result.node.name,
+                            context: result.context,
+                        })),
+                        totalUsages: results.length,
+                    }, null, 2),
+                }],
+        };
+    }
+    catch (error) {
+        throw handleError(error, 'Find usage failed');
+    }
+}
+async function handleAnalyzeCode(args) {
+    const { projectId, directory, analysisTypes = ['quality'], pathPattern, ignoreDirs = [], maxResults = 20, } = args;
+    const analysisTypesArray = Array.isArray(analysisTypes) ? analysisTypes : ['quality'];
+    try {
+        const project = await getOrCreateMCPProject(typeof projectId === 'string' ? projectId : undefined, typeof directory === 'string' ? directory : undefined, Array.isArray(ignoreDirs) ? ignoreDirs : []);
+        const options = {
+            includeQuality: analysisTypesArray.includes('quality'),
+            includeDeadcode: analysisTypesArray.includes('deadcode'),
+            includeStructure: analysisTypesArray.includes('structure'),
+            includeSyntax: analysisTypesArray.includes('syntax'),
+        };
+        const result = await analyzeProject(project, options);
+        let filteredFindings = result.findings;
+        if (typeof pathPattern === 'string') {
+            filteredFindings = result.findings.filter(finding => finding.location.includes(pathPattern));
+        }
+        const severityOrder = { critical: 0, warning: 1, info: 2 };
+        filteredFindings.sort((a, b) => {
+            const aOrder = severityOrder[a.severity] ?? 3;
+            const bOrder = severityOrder[b.severity] ?? 3;
+            return aOrder - bOrder;
+        });
+        const limitedFindings = filteredFindings.slice(0, Number(maxResults));
+        return {
+            content: [{
+                    type: 'text',
+                    text: JSON.stringify({
+                        analysis: {
+                            ...result,
+                            findings: limitedFindings,
+                            timestamp: new Date().toISOString(),
+                            projectId: project.id,
+                            directory: project.config.directory,
+                            analysisTypes,
+                            pathPattern: typeof pathPattern === 'string' ? pathPattern : undefined,
+                            maxResults: Number(maxResults),
+                            totalFindings: result.findings.length,
+                            filteredFindings: limitedFindings.length,
+                        },
+                    }, null, 2),
+                }],
+        };
+    }
+    catch (error) {
+        throw handleError(error, 'Code analysis failed');
+    }
+}
+async function handleCheckErrors(args) {
+    const { projectId, directory, pathPattern, maxResults = 50, } = args;
+    try {
+        const project = await getOrCreateMCPProject(typeof projectId === 'string' ? projectId : undefined, typeof directory === 'string' ? directory : undefined, []);
+        const result = analyzeErrors(project);
+        let filteredErrors = result.errors;
+        if (typeof pathPattern === 'string') {
+            filteredErrors = result.errors.filter(error => error.file.includes(pathPattern));
+        }
+        const limitedErrors = filteredErrors.slice(0, Number(maxResults));
+        return {
+            content: [{
+                    type: 'text',
+                    text: JSON.stringify({
+                        errors: {
+                            errors: limitedErrors,
+                            summary: result.summary,
+                            metrics: result.metrics,
+                            timestamp: new Date().toISOString(),
+                            projectId: project.id,
+                            directory: project.config.directory,
+                            pathPattern: typeof pathPattern === 'string' ? pathPattern : undefined,
+                            maxResults: Number(maxResults),
+                            totalErrors: result.errors.length,
+                            filteredErrors: limitedErrors.length,
+                        },
+                    }, null, 2),
+                }],
+        };
+    }
+    catch (error) {
+        throw handleError(error, 'Error analysis failed');
+    }
+}
+//# sourceMappingURL=handlers.js.map
